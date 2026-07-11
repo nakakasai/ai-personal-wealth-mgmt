@@ -1,0 +1,45 @@
+.env
+.env.*
+!.env.example
+
+venv/
+.venv/
+__pycache__/
+*.pyc
+
+node_modules/
+.next/
+out/
+dist/
+build/
+
+*.db
+*.sqlite
+*.sqlite3
+*.log
+
+frontend copy/
+* copy.ps1
+
+.DS_Store
+.vscode/
+.idea/
+# Uploaded statements
+uploads/
+
+# Python cache
+*.pyo
+
+# Local AI configuration
+.claude/
+
+# Test data
+dataforexpensemanagementproject/
+
+# Backup files
+* copy.py
+* copy.tsx
+*Backup*
+*backup*
+*-2026*.py
+*-2026*.tsx

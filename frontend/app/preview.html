@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AI Finance Manager</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    :root {
+      --bg: #f6f8fb;
+      --card: rgba(255,255,255,.82);
+      --text: #111827;
+      --muted: #6b7280;
+      --line: #e5e7eb;
+      --primary: #2563eb;
+      --primary-soft: #dbeafe;
+      --success: #16a34a;
+      --danger: #dc2626;
+      --warning: #f59e0b;
+      --shadow: 0 20px 60px rgba(15,23,42,.08);
+      --radius: 24px;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background:
+        radial-gradient(circle at top left, rgba(37,99,235,.16), transparent 30%),
+        radial-gradient(circle at top right, rgba(20,184,166,.14), transparent 28%),
+        var(--bg);
+      color: var(--text);
+    }
+    .app { max-width: 1440px; margin: 0 auto; padding: 28px; }
+    .topbar {
+      display: flex; align-items: center; justify-content: space-between;
+      gap: 20px; margin-bottom: 24px;
+    }
+    .brand { display: flex; align-items: center; gap: 14px; }
+    .logo {
+      width: 48px; height: 48px; border-radius: 16px;
+      display: grid; place-items: center; color: white; font-weight: 800;
+      background: linear-gradient(135deg, #2563eb, #14b8a6);
+      box-shadow: 0 12px 32px rgba(37,99,235,.25);
+    }
+    h1 { margin: 0; font-size: 30px; letter-spacing: -.04em; }
+    .subtitle { margin-top: 6px; color: var(--muted); font-size: 14px; }
+    .actions { display: flex; gap: 12px; align-items: center; }
+    select, input, button {
+      font: inherit; border: 1px solid var(--line); border-radius: 14px;
+      background: white; padding: 11px 14px; outline: none;
+    }
+    button { background: var(--text); color: white; border: none; cursor: pointer; font-weight: 700; }
+    .ghost { background: white; color: var(--text); border: 1px solid var(--line); }
+    .grid { display: grid; gap: 18px; }
+    .kpis { grid-template-columns: repeat(4, minmax(0, 1fr)); margin-bottom: 18px; }
+    .card {
+      background: var(--card); border: 1px solid rgba(229,231,235,.9);
+      border-radius: var(--radius); box-shadow: var(--shadow);
+      backdrop-filter: blur(18px); padding: 22px; overflow: hidden;
+    }
+    .kpi-label { color: var(--muted); font-size: 12px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
+    .kpi-value { font-size: 30px; font-weight: 800; margin: 12px 0 8px; letter-spacing: -.04em; }
+    .trend { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 700; padding: 6px 10px; border-radius: 999px; }
+    .trend.good { background: #dcfce7; color: #166534; }
+    .trend.bad { background: #fee2e2; color: #991b1b; }
+    .trend.neutral { background: #f3f4f6; color: #374151; }
+    .main { grid-template-columns: 1.6fr .9fr; align-items: start; }
+    .two { grid-template-columns: 1fr 1fr; }
+    .card-header { display:flex; justify-content:space-between; gap:16px; align-items:flex-start; margin-bottom:16px; }
+    h2 { margin: 0; font-size: 18px; letter-spacing: -.02em; }
+    .hint { color: var(--muted); font-size: 13px; margin-top: 6px; line-height: 1.5; }
+    .chart-wrap { height: 280px; position: relative; }
+    .insight { display:flex; gap:12px; padding:14px; border:1px solid var(--line); border-radius:18px; background:white; margin-bottom:12px; }
+    .badge { width:32px; height:32px; border-radius:12px; display:grid; place-items:center; background:var(--primary-soft); color:var(--primary); font-weight:800; flex:0 0 auto; }
+    .insight strong { display:block; font-size:14px; margin-bottom:4px; }
+    .insight p { margin:0; color:var(--muted); font-size:13px; line-height:1.45; }
+    table { width:100%; border-collapse: collapse; }
+    th { text-align:left; font-size:12px; color:var(--muted); text-transform:uppercase; letter-spacing:.06em; padding:12px; border-bottom:1px solid var(--line); }
+    td { padding:14px 12px; border-bottom:1px solid var(--line); font-size:14px; }
+    .merchant { font-weight:700; }
+    .pill { padding:6px 10px; border-radius:999px; background:#f3f4f6; font-size:12px; font-weight:700; display:inline-block; }
+    .amount.neg { color:var(--danger); font-weight:800; }
+    .amount.pos { color:var(--success); font-weight:800; }
+    .footer-grid { grid-template-columns: 1.2fr .8fr; margin-top:18px; }
+    .cash-row { display:flex; justify-content:space-between; align-items:center; padding:14px 0; border-bottom:1px solid var(--line); }
+    .cash-row:last-child { border-bottom:0; }
+    .search { min-width: 280px; }
+    @media (max-width: 1000px) { .kpis, .main, .two, .footer-grid { grid-template-columns: 1fr; } .topbar { flex-direction:column; align-items:stretch; } .actions { flex-wrap:wrap; } }
+  </style>
+</head>
+<body>
+  <main class="app">
+    <header class="topbar">
+      <div class="brand">
+        <div class="logo">AI</div>
+        <div>
+          <h1>AI Finance Manager</h1>
+          <div class="subtitle">Professional dashboard for expense intelligence, cashflow tracking, and AI-driven money decisions.</div>
+        </div>
+      </div>
+      <div class="actions">
+        <select aria-label="Month selector"><option>June 2026</option><option>May 2026</option><option>April 2026</option></select>
+        <button class="ghost">Upload CSV</button>
+        <button>Generate AI Insights</button>
+      </div>
+    </header>
+
+    <section class="grid kpis">
+      <article class="card"><div class="kpi-label">Total Income</div><div class="kpi-value">₹ 4,20,000</div><span class="trend good">▲ Connected</span></article>
+      <article class="card"><div class="kpi-label">Total Expense</div><div class="kpi-value">₹ 1,86,540</div><span class="trend bad">▼ 44% of income</span></article>
+      <article class="card"><div class="kpi-label">Net Savings</div><div class="kpi-value">₹ 2,33,460</div><span class="trend good">▲ Positive cashflow</span></article>
+      <article class="card"><div class="kpi-label">Savings Rate</div><div class="kpi-value">55.6%</div><span class="trend neutral">Target 60%</span></article>
+    </section>
+
+    <section class="grid main">
+      <article class="card">
+        <div class="card-header">
+          <div><h2>Spend by Category</h2><div class="hint">Cleaned category view based on merchant intelligence.</div></div>
+          <span class="pill">Total expense ₹ 1,86,540</span>
+        </div>
+        <div class="chart-wrap"><canvas id="categoryChart"></canvas></div>
+      </article>
+
+      <aside class="card">
+        <div class="card-header"><div><h2>AI Insights</h2><div class="hint">Action-oriented summary from current data.</div></div></div>
+        <div class="insight"><div class="badge">1</div><div><strong>Subscriptions can be optimized</strong><p>Recurring digital services are 12% of monthly expense. Review unused plans before renewal.</p></div></div>
+        <div class="insight"><div class="badge">2</div><div><strong>Food delivery is trending high</strong><p>Dining and delivery spend increased versus last month. Set a weekly cap to protect savings rate.</p></div></div>
+        <div class="insight"><div class="badge">3</div><div><strong>Large one-time transactions detected</strong><p>Two high-value purchases explain most variance. Keep these separated from regular monthly budget.</p></div></div>
+      </aside>
+    </section>
+
+    <section class="grid footer-grid">
+      <article class="card">
+        <div class="card-header">
+          <div><h2>Top Merchants</h2><div class="hint">Normalized merchant names from raw card-statement descriptions.</div></div>
+        </div>
+        <div class="chart-wrap"><canvas id="merchantChart"></canvas></div>
+      </article>
+
+      <article class="card">
+        <h2>Cashflow Snapshot</h2>
+        <div class="hint">Monthly aggregation summary.</div>
+        <div class="cash-row"><span>Income</span><strong class="amount pos">₹ 4,20,000</strong></div>
+        <div class="cash-row"><span>Expense</span><strong class="amount neg">₹ 1,86,540</strong></div>
+        <div class="cash-row"><span>Spend vs Income</span><strong>44.4%</strong></div>
+        <div class="cash-row"><span>Available to invest</span><strong class="amount pos">₹ 1,50,000</strong></div>
+      </article>
+    </section>
+
+    <section class="card" style="margin-top:18px;">
+      <div class="card-header">
+        <div><h2>Transactions</h2><div class="hint">Merchant, category, raw description, and amount.</div></div>
+        <input class="search" placeholder="Search merchant, category, or description" />
+      </div>
+      <table>
+        <thead><tr><th>Merchant</th><th>Category</th><th>Description</th><th>Amount</th></tr></thead>
+        <tbody>
+          <tr><td class="merchant">Uber Eats</td><td><span class="pill">Food</span></td><td>UPI / card statement normalized</td><td class="amount neg">-₹ 8,450</td></tr>
+          <tr><td class="merchant">Netflix</td><td><span class="pill">Subscription</span></td><td>Monthly recurring payment</td><td class="amount neg">-₹ 649</td></tr>
+          <tr><td class="merchant">Amazon</td><td><span class="pill">Shopping</span></td><td>Online purchase</td><td class="amount neg">-₹ 18,200</td></tr>
+          <tr><td class="merchant">Salary</td><td><span class="pill">Income</span></td><td>Monthly income credit</td><td class="amount pos">₹ 4,20,000</td></tr>
+        </tbody>
+      </table>
+    </section>
+  </main>
+
+  <script>
+    const categoryCtx = document.getElementById('categoryChart');
+    new Chart(categoryCtx, {
+      type: 'doughnut',
+      data: { labels: ['Housing', 'Food', 'Shopping', 'Transport', 'Subscriptions', 'Other'], datasets: [{ data: [62000, 32500, 41000, 18500, 12400, 20140], borderWidth: 0 }] },
+      options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'right', labels: { usePointStyle: true, boxWidth: 8 } } }, cutout: '68%' }
+    });
+
+    const merchantCtx = document.getElementById('merchantChart');
+    new Chart(merchantCtx, {
+      type: 'bar',
+      data: { labels: ['Amazon', 'Uber Eats', 'Rent', 'JR/Metro', 'Netflix'], datasets: [{ label: 'Spend', data: [18200, 8450, 62000, 9800, 649], borderRadius: 12 }] },
+      options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, grid: { color: '#eef2f7' } }, x: { grid: { display: false } } } }
+    });
+  </script>
+</body>
+</html>
