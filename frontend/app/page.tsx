@@ -332,25 +332,25 @@ export default function DashboardPage() {
       effectiveSelectedCategory == null
         ? expenseTxns
         : expenseTxns.filter(
-            (txn) =>
-              displayCategory(txn.description, txn.category) ===
-              effectiveSelectedCategory,
-          );
+          (txn) =>
+            displayCategory(txn.description, txn.category) ===
+            effectiveSelectedCategory,
+        );
     const query = searchQuery.trim().toLowerCase();
     const filteredTxns = query
       ? categoryFilteredTxns.filter((txn) => {
-          const merchant = extractMerchant(txn.description).toLowerCase();
-          const description = (txn.description || "").toLowerCase();
-          const category = displayCategory(
-            txn.description,
-            txn.category,
-          ).toLowerCase();
-          return (
-            merchant.includes(query) ||
-            description.includes(query) ||
-            category.includes(query)
-          );
-        })
+        const merchant = extractMerchant(txn.description).toLowerCase();
+        const description = (txn.description || "").toLowerCase();
+        const category = displayCategory(
+          txn.description,
+          txn.category,
+        ).toLowerCase();
+        return (
+          merchant.includes(query) ||
+          description.includes(query) ||
+          category.includes(query)
+        );
+      })
       : categoryFilteredTxns;
     return {
       categoryChartData,
@@ -453,6 +453,13 @@ export default function DashboardPage() {
                 className="lightBtn"
               >
                 Upload Statement
+              </button>
+
+              <button
+                onClick={() => router.push("/net-worth")}
+                className="wealthBtn"
+              >
+                Net Worth
               </button>
               <button
                 onClick={() => {
@@ -615,14 +622,14 @@ export default function DashboardPage() {
               {(insightLines.length > 0
                 ? insightLines
                 : [
-                    dashboard.largestCategory
-                      ? `${dashboard.largestCategory.category} is the biggest spending driver at ${dashboard.largestCategory.percentage.toFixed(0)}% of total expenses.`
-                      : "Upload CSV to see category insights.",
-                    data.income === 0
-                      ? "Income is not connected yet, so savings and savings rate are temporary."
-                      : `Savings rate is ${dashboard.savingsRate.toFixed(1)}% for this period.`,
-                    "Start with top merchants and large one-time transactions for fastest savings opportunities.",
-                  ]
+                  dashboard.largestCategory
+                    ? `${dashboard.largestCategory.category} is the biggest spending driver at ${dashboard.largestCategory.percentage.toFixed(0)}% of total expenses.`
+                    : "Upload CSV to see category insights.",
+                  data.income === 0
+                    ? "Income is not connected yet, so savings and savings rate are temporary."
+                    : `Savings rate is ${dashboard.savingsRate.toFixed(1)}% for this period.`,
+                  "Start with top merchants and large one-time transactions for fastest savings opportunities.",
+                ]
               ).map((line, index) => (
                 <InsightCard key={index} index={index + 1} text={line} />
               ))}
@@ -902,6 +909,31 @@ function DashboardStyles() {
       .afmRoot,
       .afmRoot * {
         box-sizing: border-box;
+      }
+        
+      .wealthBtn {
+        height: 38px;
+        border-radius: 999px;
+        padding: 0 16px;
+        background: linear-gradient(90deg, #2563eb, #4f46e5);
+        color: #ffffff;
+        font-size: 12px;
+        font-weight: 800;
+        border: 1px solid rgba(255, 255, 255, 0.16);
+        box-shadow: 0 8px 20px rgba(37, 99, 235, 0.28);
+        transition:
+          transform 0.15s ease,
+          box-shadow 0.15s ease,
+          opacity 0.15s ease;
+      }
+
+      .wealthBtn:hover {
+        transform: translateY(-1px);
+        box-shadow: 0 10px 24px rgba(37, 99, 235, 0.36);
+      }
+
+      .wealthBtn:active {
+        transform: translateY(0);
       }
       .afmRoot {
         min-height: 100vh;

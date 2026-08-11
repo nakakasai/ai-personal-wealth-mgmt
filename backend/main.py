@@ -1,19 +1,28 @@
 # Create a basic FastAPI app with a /health endpoint returning {"status": "ok"}
-from fastapi import FastAPI
 
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+
 from database import Base, engine
 from models import User
+
 import upload
 import auth
 import dashboard
+import networth
+
 
 app = FastAPI()
 
-# allow frontend dev origin
+
+# =====================================================
+# CORS
+# =====================================================
+
 origins = [
     "http://localhost:3000",
 ]
+
 
 app.add_middleware(
     CORSMiddleware,
@@ -23,16 +32,30 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+# =====================================================
+# DATABASE TABLE CREATION
+# =====================================================
+
 Base.metadata.create_all(bind=engine)
 
+
+# =====================================================
+# ROUTERS
+# =====================================================
+
 app.include_router(auth.router)
+app.include_router(upload.router)
+app.include_router(dashboard.router)
+
+# NEW - Net Worth module
+app.include_router(networth.router)
 
 
+# =====================================================
+# HEALTH CHECK
+# =====================================================
 
 @app.get("/health")
 def health_check():
     return {"status": "ok"}
-
-app.include_router(upload.router)
-app.include_router(dashboard.router)
-
