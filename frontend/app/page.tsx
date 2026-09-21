@@ -24,6 +24,17 @@ type OverviewResponse = {
   recent_transactions: RecentTxn[];
 };
 type MerchantSummary = { merchant: string; amount: number; count: number };
+type AssetAllocation = {
+  category: string;
+  value: number;
+  percentage: number;
+};
+type NetWorthSummary = {
+  total_assets: number;
+  total_liabilities: number;
+  net_worth: number;
+  allocation: AssetAllocation[];
+};
 
 const CATEGORY_COLORS = [
   "#2563EB",
@@ -167,6 +178,9 @@ function splitInsightText(text: string) {
 export default function DashboardPage() {
   const router = useRouter();
   const [data, setData] = useState<OverviewResponse | null>(null);
+  const [wealth, setWealth] = useState<NetWorthSummary | null>(null);
+  const [wealthLoading, setWealthLoading] = useState(true);
+  const [wealthError, setWealthError] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [selectedMonth, setSelectedMonth] = useState<string>("");
@@ -201,6 +215,27 @@ export default function DashboardPage() {
     }
   };
 
+  const fetchWealthSummary = async (token: string) => {
+    setWealthLoading(true);
+    setWealthError("");
+    try {
+      const res = await fetch(`${API_BASE}/net-worth/summary`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.detail || "Failed to load net worth");
+      }
+      setWealth((await res.json()) as NetWorthSummary);
+    } catch (err: any) {
+      setWealthError(err.message || "Failed to load net worth");
+    } finally {
+      setWealthLoading(false);
+    }
+  };
+
   useEffect(() => {
     const token = localStorage.getItem("token");
     if (!token) {
@@ -208,6 +243,7 @@ export default function DashboardPage() {
       return;
     }
     fetchData(token, selectedMonth, selectedSource);
+    fetchWealthSummary(token);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [router]);
 
@@ -414,8 +450,8 @@ export default function DashboardPage() {
               <div>
                 <h1>AI Finance Manager</h1>
                 <p>
-                  Professional desktop dashboard for expense intelligence and
-                  cashflow tracking by account.
+                  Your complete financial position, asset allocation, and
+                  monthly expense intelligence in one place.
                 </p>
               </div>
             </div>
@@ -476,39 +512,115 @@ export default function DashboardPage() {
 
         <section className="kpiGrid">
           <KpiCard
-            title="Total Income"
-            value={`₹ ${formatCurrency(data.income)}`}
-            helper={
-              data.income === 0
-                ? "Income data not connected"
-                : `${data.month} · ${accountLabel(selectedSource)}`
-            }
+            title="Net Worth"
+            value={wealthLoading ? "Loading..." : wealth ? `¥ ${formatCurrency(wealth.net_worth)}` : "Unavailable"}
+            helper={wealthError || "Assets minus liabilities"}
+            tone="blue"
+          />
+          <KpiCard
+            title="Total Assets"
+            value={wealthLoading ? "Loading..." : wealth ? `¥ ${formatCurrency(wealth.total_assets)}` : "Unavailable"}
+            helper={wealth ? `${wealth.allocation.length} asset categories` : "Add assets in Net Worth"}
             tone="emerald"
           />
           <KpiCard
-            title="Total Expense"
+            title="Total Liabilities"
+            value={wealthLoading ? "Loading..." : wealth ? `¥ ${formatCurrency(wealth.total_liabilities)}` : "Unavailable"}
+            helper="Loans and outstanding balances"
+            tone="amber"
+          />
+          <KpiCard
+            title="Monthly Expenses"
             value={`₹ ${formatCurrency(data.expense)}`}
-            helper={`${dashboard.expenseTxns.length} expense transactions`}
+            helper={`${data.month} · ${dashboard.expenseTxns.length} transactions`}
             tone="rose"
           />
-          <KpiCard
-            title="Net Savings"
-            value={`₹ ${formatCurrency(data.net)}`}
-            helper={
-              data.net >= 0
-                ? "Positive cashflow"
-                : "Temporary until income is added"
+        </section>
+
+        <section className="mainGrid">
+          <Panel
+            className="span12"
+            title="Asset Allocation"
+            subtitle="How your total assets are distributed across equity, real estate, cash, funds, and other categories."
+            action={
+              <button onClick={() => router.push("/net-worth")} className="darkBtn">
+                Manage Assets
+              </button>
             }
-            tone={data.net >= 0 ? "blue" : "amber"}
-          />
-          <KpiCard
-            title="Savings Rate"
-            value={`${dashboard.savingsRate.toFixed(1)}%`}
-            helper={
-              data.income > 0 ? "Savings / income" : "Waiting for income data"
-            }
-            tone="violet"
-          />
+          >
+            <div className="categoryLayout">
+              <div className="chartBox">
+                {wealth && wealth.allocation.length > 0 ? (
+                  <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                      <Pie
+                        data={wealth.allocation}
+                        dataKey="value"
+                        nameKey="category"
+                        cx="50%"
+                        cy="50%"
+                        outerRadius={104}
+                        innerRadius={66}
+                        paddingAngle={3}
+                      >
+                        {wealth.allocation.map((entry, index) => (
+                          <Cell
+                            key={entry.category}
+                            fill={CATEGORY_COLORS[index % CATEGORY_COLORS.length]}
+                          />
+                        ))}
+                      </Pie>
+                      <Tooltip
+                        formatter={(value: any) =>
+                          `¥ ${formatCurrency(Number(value))}`
+                        }
+                        contentStyle={{
+                          backgroundColor: "#FFFFFF",
+                          border: "1px solid #E2E8F0",
+                          borderRadius: "14px",
+                          fontSize: "12px",
+                          boxShadow: "0 12px 28px rgba(15,23,42,0.10)",
+                        }}
+                      />
+                    </PieChart>
+                  </ResponsiveContainer>
+                ) : (
+                  <div className="emptyState">
+                    {wealthLoading ? "Loading asset allocation..." : "Add assets to see your allocation"}
+                  </div>
+                )}
+              </div>
+              <div className="categoryList">
+                {(wealth?.allocation || []).map((asset, index) => (
+                  <div key={asset.category} className="categoryRow">
+                    <div className="categoryTop">
+                      <span
+                        className="dot"
+                        style={{
+                          backgroundColor:
+                            CATEGORY_COLORS[index % CATEGORY_COLORS.length],
+                        }}
+                      />
+                      <span className="catName">{asset.category}</span>
+                      <span className="catPct">{asset.percentage.toFixed(1)}%</span>
+                      <span className="catAmount">
+                        ¥ {formatCurrency(asset.value)}
+                      </span>
+                    </div>
+                    <div className="bar">
+                      <div
+                        style={{
+                          width: `${Math.min(asset.percentage, 100)}%`,
+                          backgroundColor:
+                            CATEGORY_COLORS[index % CATEGORY_COLORS.length],
+                        }}
+                      />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </Panel>
         </section>
 
         <section className="mainGrid">
@@ -1156,6 +1268,9 @@ function DashboardStyles() {
         grid-template-columns: repeat(12, minmax(0, 1fr));
         gap: 24px;
         margin-bottom: 24px;
+      }
+      .span12 {
+        grid-column: span 12;
       }
       .span7 {
         grid-column: span 7;
