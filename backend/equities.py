@@ -89,49 +89,95 @@ def _session_for(user_id: int) -> dict[str, str]:
     return session
 
 
-def _number(value: Any) -> float | None:
+def _number(value: Any, default: float = 0) -> float:
     if isinstance(value, bool):
-        return None
+        return default
     if isinstance(value, (int, float)):
         return float(value)
     if isinstance(value, str):
         try:
             return float(value.replace(",", "").replace("₹", "").strip())
         except ValueError:
-            return None
-    return None
+            return default
+    return default
 
 
-def _find_current_value(payload: Any) -> float | None:
-    preferred_keys = {
-        "current_value",
-        "currentvalue",
-        "total_current_value",
-        "totalcurrentvalue",
-        "holding_value",
-        "holdings_value",
-        "portfolio_value",
-        "market_value",
+def _paytm_holdings(user_id: int) -> list[dict[str, Any]]:
+    session = _session_for(user_id)
+    read_token = session.get("read_access_token") or session.get("access_token")
+    payload = _paytm_request(
+        "GET",
+        "/holdings/v1/get-user-holdings-data",
+        token=read_token,
+    )
+
+    results = payload.get("data", {}).get("results", [])
+    if not isinstance(results, list):
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Paytm Money returned an unexpected holdings response",
+        )
+    return results
+
+
+def _normalize_holding(item: dict[str, Any]) -> dict[str, Any]:
+    # quantity represents the complete demat holding. remaining_quantity is the
+    # currently available-to-sell portion and can exclude utilized/pledged units.
+    quantity = _number(item.get("quantity"))
+    cost_price = _number(item.get("cost_price"))
+    last_price = _number(item.get("last_traded_price"))
+    invested_value = quantity * cost_price
+    current_value = quantity * last_price
+    gain_loss = current_value - invested_value
+    gain_loss_percentage = (
+        gain_loss / invested_value * 100 if invested_value else 0
+    )
+
+    exchange = item.get("exchange")
+    symbol = (
+        item.get("nse_symbol")
+        if exchange == "NSE"
+        else item.get("bse_symbol")
+    ) or item.get("nse_symbol") or item.get("bse_symbol")
+
+    return {
+        "name": item.get("display_name") or symbol or "Unknown security",
+        "symbol": symbol,
+        "exchange": exchange,
+        "isin": item.get("isin_code"),
+        "sector": item.get("sector"),
+        "quantity": quantity,
+        "available_quantity": _number(item.get("remaining_quantity")),
+        "cost_price": round(cost_price, 4),
+        "last_price": round(last_price, 4),
+        "invested_value": round(invested_value, 2),
+        "current_value": round(current_value, 2),
+        "gain_loss": round(gain_loss, 2),
+        "gain_loss_percentage": round(gain_loss_percentage, 2),
+        "currency": "INR",
     }
 
-    if isinstance(payload, dict):
-        for key, value in payload.items():
-            if key.replace("-", "_").lower() in preferred_keys:
-                parsed = _number(value)
-                if parsed is not None:
-                    return parsed
-        for value in payload.values():
-            found = _find_current_value(value)
-            if found is not None:
-                return found
 
-    if isinstance(payload, list):
-        values = [_find_current_value(item) for item in payload]
-        values = [value for value in values if value is not None]
-        if values:
-            return sum(values)
+def _portfolio(user_id: int) -> dict[str, Any]:
+    holdings = [_normalize_holding(item) for item in _paytm_holdings(user_id)]
+    total_invested = sum(item["invested_value"] for item in holdings)
+    total_current = sum(item["current_value"] for item in holdings)
+    total_gain_loss = total_current - total_invested
 
-    return None
+    return {
+        "broker": "Paytm Money",
+        "currency": "INR",
+        "holding_count": len(holdings),
+        "total_invested_value": round(total_invested, 2),
+        "total_current_value": round(total_current, 2),
+        "total_gain_loss": round(total_gain_loss, 2),
+        "total_gain_loss_percentage": round(
+            total_gain_loss / total_invested * 100 if total_invested else 0,
+            2,
+        ),
+        "price_as_of": datetime.utcnow(),
+        "holdings": holdings,
+    }
 
 
 @router.get("/connect")
@@ -238,13 +284,7 @@ def paytm_status(
 def get_paytm_holdings(
     user_id: int = Depends(get_current_user_id),
 ):
-    session = _session_for(user_id)
-    read_token = session.get("read_access_token") or session.get("access_token")
-    return _paytm_request(
-        "GET",
-        "/holdings/v1/get-user-holdings-data",
-        token=read_token,
-    )
+    return _portfolio(user_id)
 
 
 @router.post("/sync")
@@ -252,25 +292,9 @@ def sync_paytm_equity(
     db: Session = Depends(get_db),
     user_id: int = Depends(get_current_user_id),
 ):
-    session = _session_for(user_id)
-    read_token = session.get("read_access_token") or session.get("access_token")
-
-    value_payload = _paytm_request(
-        "GET",
-        "/holdings/v1/get-holdings-value",
-        token=read_token,
-    )
-    current_value = _find_current_value(value_payload)
-
-    if current_value is None:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=(
-                "Paytm holdings were fetched, but the current-value field "
-                "could not be recognized. Use GET /equities/paytm/holdings "
-                "to inspect the broker response."
-            ),
-        )
+    portfolio = _portfolio(user_id)
+    current_value = portfolio["total_current_value"]
+    invested_value = portfolio["total_invested_value"]
 
     asset = (
         db.query(WealthAsset)
@@ -282,6 +306,11 @@ def sync_paytm_equity(
         .first()
     )
 
+    note = (
+        f"Automatically synchronized {portfolio['holding_count']} holdings "
+        f"from Paytm Money Open API at {datetime.utcnow().isoformat()}Z"
+    )
+
     if asset is None:
         asset = WealthAsset(
             user_id=user_id,
@@ -291,12 +320,15 @@ def sync_paytm_equity(
             currency="INR",
             source_type="api",
             current_value=current_value,
-            notes="Automatically synchronized from Paytm Money Open API",
+            invested_value=invested_value,
+            notes=note,
         )
         db.add(asset)
     else:
         asset.current_value = current_value
+        asset.invested_value = invested_value
         asset.currency = "INR"
+        asset.notes = note
         asset.updated_at = datetime.utcnow()
 
     db.commit()
@@ -304,10 +336,8 @@ def sync_paytm_equity(
     create_or_update_snapshot(db, user_id)
 
     return {
-        "broker": "Paytm Money",
+        **portfolio,
         "asset_id": asset.id,
-        "currency": "INR",
-        "current_value": current_value,
         "synced_at": datetime.utcnow(),
     }
 
