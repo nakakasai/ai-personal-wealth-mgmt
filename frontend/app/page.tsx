@@ -298,7 +298,7 @@ export default function DashboardPage() {
 
     setPaytmLoading(true);
     setPaytmError("");
-    setPaytmMessage("Opening Paytm Money secure login...");
+    setPaytmMessage("Redirecting to Paytm Money secure login...");
     try {
       const res = await fetch(`${API_BASE}/equities/paytm/connect`, {
         headers: { Authorization: `Bearer ${token}` },
@@ -308,26 +308,10 @@ export default function DashboardPage() {
         throw new Error(body.detail || "Could not start Paytm connection");
       }
       const body = await res.json();
-      window.open(
-        body.login_url,
-        "_blank",
-        "noopener,noreferrer",
-      );
-
-      setPaytmMessage("Complete login and OTP in the Paytm window...");
-      for (let attempt = 0; attempt < 60; attempt += 1) {
-        await new Promise((resolve) => window.setTimeout(resolve, 2000));
-        if (await fetchPaytmStatus(token)) {
-          setPaytmMessage("Paytm connected. Refreshing portfolio...");
-          await handlePaytmSync(token);
-          return;
-        }
-      }
-      throw new Error("Paytm login timed out. Please try Connect again.");
+      window.location.assign(body.login_url);
     } catch (err: any) {
       setPaytmError(err.message || "Could not connect Paytm Money");
       setPaytmMessage("");
-    } finally {
       setPaytmLoading(false);
     }
   };
@@ -374,7 +358,15 @@ export default function DashboardPage() {
     }
     fetchData(token, selectedMonth, selectedSource);
     fetchWealthSummary(token);
-    fetchPaytmStatus(token);
+    fetchPaytmStatus(token).then((connected) => {
+      const returnedFromPaytm =
+        new URLSearchParams(window.location.search).get("paytm") === "connected";
+      if (connected && returnedFromPaytm) {
+        handlePaytmSync(token).finally(() => {
+          window.history.replaceState({}, "", window.location.pathname);
+        });
+      }
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [router]);
 
