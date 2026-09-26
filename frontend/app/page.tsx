@@ -36,6 +36,23 @@ type NetWorthSummary = {
   allocation: AssetAllocation[];
 };
 
+type PaytmPortfolio = {
+  broker: string;
+  currency: "INR";
+  base_currency: "JPY";
+  holding_count: number;
+  total_invested_value: number;
+  total_current_value: number;
+  total_gain_loss: number;
+  total_gain_loss_percentage: number;
+  inr_to_jpy_rate: number;
+  fx_rate_date: string;
+  total_invested_value_jpy: number;
+  total_current_value_jpy: number;
+  total_gain_loss_jpy: number;
+  price_as_of: string;
+};
+
 const CATEGORY_COLORS = [
   "#2563EB",
   "#7C3AED",
@@ -181,6 +198,11 @@ export default function DashboardPage() {
   const [wealth, setWealth] = useState<NetWorthSummary | null>(null);
   const [wealthLoading, setWealthLoading] = useState(true);
   const [wealthError, setWealthError] = useState("");
+  const [paytmConnected, setPaytmConnected] = useState(false);
+  const [paytmPortfolio, setPaytmPortfolio] = useState<PaytmPortfolio | null>(null);
+  const [paytmLoading, setPaytmLoading] = useState(false);
+  const [paytmMessage, setPaytmMessage] = useState("");
+  const [paytmError, setPaytmError] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [selectedMonth, setSelectedMonth] = useState<string>("");
@@ -236,6 +258,114 @@ export default function DashboardPage() {
     }
   };
 
+  const fetchPaytmPortfolio = async (token: string) => {
+    const res = await fetch(`${API_BASE}/equities/paytm/holdings`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.detail || "Failed to load Paytm holdings");
+    }
+    const portfolio = (await res.json()) as PaytmPortfolio;
+    setPaytmPortfolio(portfolio);
+    return portfolio;
+  };
+
+  const fetchPaytmStatus = async (token: string) => {
+    const res = await fetch(`${API_BASE}/equities/paytm/status`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) return false;
+    const body = await res.json();
+    const connected = Boolean(body.connected);
+    setPaytmConnected(connected);
+    if (connected) {
+      try {
+        await fetchPaytmPortfolio(token);
+      } catch {
+        // Connection status remains useful even if a quote refresh briefly fails.
+      }
+    }
+    return connected;
+  };
+
+  const handlePaytmConnect = async () => {
+    const token = localStorage.getItem("token");
+    if (!token) {
+      router.replace("/login");
+      return;
+    }
+
+    setPaytmLoading(true);
+    setPaytmError("");
+    setPaytmMessage("Opening Paytm Money secure login...");
+    try {
+      const res = await fetch(`${API_BASE}/equities/paytm/connect`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.detail || "Could not start Paytm connection");
+      }
+      const body = await res.json();
+      window.open(
+        body.login_url,
+        "_blank",
+        "noopener,noreferrer",
+      );
+
+      setPaytmMessage("Complete login and OTP in the Paytm window...");
+      for (let attempt = 0; attempt < 60; attempt += 1) {
+        await new Promise((resolve) => window.setTimeout(resolve, 2000));
+        if (await fetchPaytmStatus(token)) {
+          setPaytmMessage("Paytm connected. Refreshing portfolio...");
+          await handlePaytmSync(token);
+          return;
+        }
+      }
+      throw new Error("Paytm login timed out. Please try Connect again.");
+    } catch (err: any) {
+      setPaytmError(err.message || "Could not connect Paytm Money");
+      setPaytmMessage("");
+    } finally {
+      setPaytmLoading(false);
+    }
+  };
+
+  const handlePaytmSync = async (providedToken?: string) => {
+    const token = providedToken || localStorage.getItem("token");
+    if (!token) {
+      router.replace("/login");
+      return;
+    }
+
+    setPaytmLoading(true);
+    setPaytmError("");
+    setPaytmMessage("Updating prices and converting INR to JPY...");
+    try {
+      const res = await fetch(`${API_BASE}/equities/paytm/sync`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.detail || "Failed to synchronize Paytm portfolio");
+      }
+      const portfolio = (await res.json()) as PaytmPortfolio;
+      setPaytmPortfolio(portfolio);
+      setPaytmConnected(true);
+      setPaytmMessage(
+        `Updated ${portfolio.holding_count} holdings using ECB FX rate dated ${portfolio.fx_rate_date}.`,
+      );
+      await fetchWealthSummary(token);
+    } catch (err: any) {
+      setPaytmError(err.message || "Failed to synchronize Paytm portfolio");
+      setPaytmMessage("");
+    } finally {
+      setPaytmLoading(false);
+    }
+  };
+
   useEffect(() => {
     const token = localStorage.getItem("token");
     if (!token) {
@@ -244,6 +374,7 @@ export default function DashboardPage() {
     }
     fetchData(token, selectedMonth, selectedSource);
     fetchWealthSummary(token);
+    fetchPaytmStatus(token);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [router]);
 
@@ -535,6 +666,79 @@ export default function DashboardPage() {
             helper={`${data.month} · ${dashboard.expenseTxns.length} transactions`}
             tone="rose"
           />
+        </section>
+
+        <section className="brokerCard">
+          <div className="brokerIdentity">
+            <div className="brokerLogo">₹</div>
+            <div>
+              <div className="brokerTitleRow">
+                <h2>Indian Equity · Paytm Money</h2>
+                <span className={paytmConnected ? "statusBadge connected" : "statusBadge"}>
+                  {paytmConnected ? "Connected" : "Not connected"}
+                </span>
+              </div>
+              <p>
+                Official broker holdings, current market value, and automatic
+                INR-to-JPY conversion for Net Worth.
+              </p>
+            </div>
+          </div>
+
+          {paytmPortfolio ? (
+            <div className="brokerMetrics">
+              <div>
+                <span>Invested</span>
+                <strong>₹ {formatCurrency(paytmPortfolio.total_invested_value)}</strong>
+              </div>
+              <div>
+                <span>Current value</span>
+                <strong>₹ {formatCurrency(paytmPortfolio.total_current_value)}</strong>
+              </div>
+              <div>
+                <span>Gain / loss</span>
+                <strong className={paytmPortfolio.total_gain_loss >= 0 ? "positive" : "negative"}>
+                  ₹ {formatCurrency(paytmPortfolio.total_gain_loss)}
+                  {" · "}
+                  {formatCurrency(paytmPortfolio.total_gain_loss_percentage)}%
+                </strong>
+              </div>
+              <div>
+                <span>Net Worth value</span>
+                <strong>¥ {formatCurrency(paytmPortfolio.total_current_value_jpy)}</strong>
+                <small>
+                  1 INR = {paytmPortfolio.inr_to_jpy_rate} JPY · ECB {paytmPortfolio.fx_rate_date}
+                </small>
+              </div>
+            </div>
+          ) : (
+            <p className="brokerEmpty">
+              Connect your Paytm Money account to retrieve your six equity holdings.
+            </p>
+          )}
+
+          <div className="brokerActions">
+            <button
+              className="outlineBtn"
+              onClick={handlePaytmConnect}
+              disabled={paytmLoading}
+            >
+              {paytmConnected ? "Reconnect Paytm" : "Connect Paytm Money"}
+            </button>
+            <button
+              className="darkBtn"
+              onClick={() => handlePaytmSync()}
+              disabled={!paytmConnected || paytmLoading}
+            >
+              {paytmLoading ? "Working..." : "Refresh Portfolio"}
+            </button>
+          </div>
+
+          {(paytmMessage || paytmError) && (
+            <p className={paytmError ? "brokerNotice error" : "brokerNotice"}>
+              {paytmError || paytmMessage}
+            </p>
+          )}
         </section>
 
         <section className="mainGrid">
@@ -1742,6 +1946,122 @@ function DashboardStyles() {
         padding: 10px 16px;
         font-weight: 800;
       }
+      .brokerCard {
+        display: grid;
+        grid-template-columns: minmax(280px, 1.15fr) minmax(520px, 1.85fr) auto;
+        align-items: center;
+        gap: 24px;
+        margin-bottom: 22px;
+        padding: 22px 24px;
+        border: 1px solid #dbeafe;
+        border-radius: 24px;
+        background: linear-gradient(135deg, #ffffff 0%, #eff6ff 100%);
+        box-shadow: 0 14px 35px rgba(30, 64, 175, 0.08);
+      }
+      .brokerIdentity {
+        display: flex;
+        align-items: center;
+        gap: 14px;
+      }
+      .brokerLogo {
+        display: grid;
+        place-items: center;
+        width: 50px;
+        height: 50px;
+        flex: 0 0 50px;
+        border-radius: 16px;
+        background: linear-gradient(135deg, #0ea5e9, #1d4ed8);
+        color: white;
+        font-size: 24px;
+        font-weight: 900;
+      }
+      .brokerTitleRow {
+        display: flex;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 10px;
+      }
+      .brokerTitleRow h2 {
+        margin: 0;
+        color: #0f172a;
+        font-size: 18px;
+        font-weight: 900;
+      }
+      .brokerIdentity p,
+      .brokerEmpty {
+        margin: 5px 0 0;
+        color: #64748b;
+        font-size: 13px;
+        line-height: 1.45;
+      }
+      .statusBadge {
+        border-radius: 999px;
+        background: #f1f5f9;
+        color: #64748b;
+        padding: 4px 9px;
+        font-size: 11px;
+        font-weight: 850;
+      }
+      .statusBadge.connected {
+        background: #dcfce7;
+        color: #15803d;
+      }
+      .brokerMetrics {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(125px, 1fr));
+        gap: 12px;
+      }
+      .brokerMetrics div {
+        min-width: 0;
+        padding: 12px 14px;
+        border: 1px solid rgba(191, 219, 254, 0.85);
+        border-radius: 16px;
+        background: rgba(255, 255, 255, 0.8);
+      }
+      .brokerMetrics span,
+      .brokerMetrics small {
+        display: block;
+        color: #64748b;
+        font-size: 11px;
+        font-weight: 750;
+      }
+      .brokerMetrics strong {
+        display: block;
+        margin-top: 5px;
+        color: #0f172a;
+        font-size: 15px;
+        font-weight: 900;
+        white-space: nowrap;
+      }
+      .brokerMetrics strong.positive {
+        color: #047857;
+      }
+      .brokerMetrics strong.negative {
+        color: #be123c;
+      }
+      .brokerMetrics small {
+        margin-top: 4px;
+        white-space: nowrap;
+      }
+      .brokerActions {
+        display: flex;
+        gap: 10px;
+        justify-content: flex-end;
+      }
+      .brokerActions button:disabled {
+        cursor: not-allowed;
+        opacity: 0.55;
+      }
+      .brokerNotice {
+        grid-column: 1 / -1;
+        margin: -8px 0 0;
+        color: #1d4ed8;
+        font-size: 13px;
+        font-weight: 750;
+      }
+      .brokerNotice.error {
+        color: #be123c;
+      }
       @media (max-width: 1250px) {
         .dashboardWrap {
           min-width: 0;
@@ -1754,6 +2074,15 @@ function DashboardStyles() {
         }
         .heroActions {
           flex-wrap: wrap;
+        }
+        .brokerCard {
+          grid-template-columns: 1fr;
+        }
+        .brokerMetrics {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+        .brokerActions {
+          justify-content: flex-start;
         }
         .kpiGrid {
           grid-template-columns: repeat(2, minmax(0, 1fr));
