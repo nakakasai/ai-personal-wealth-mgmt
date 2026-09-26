@@ -10,7 +10,7 @@ from urllib.request import Request, urlopen
 from xml.etree import ElementTree
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from fastapi.responses import HTMLResponse
+from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
 
 from models import WealthAsset
@@ -267,7 +267,7 @@ def connect_paytm(
     return {"login_url": login_url}
 
 
-@router.get("/callback", response_class=HTMLResponse)
+@router.get("/callback", response_class=RedirectResponse)
 def paytm_callback(
     request_token: str | None = Query(default=None, alias="requestToken"),
     request_token_snake: str | None = Query(default=None, alias="request_token"),
@@ -327,9 +327,13 @@ def paytm_callback(
             and isinstance(value, str)
         }
 
-    return HTMLResponse(
-        "<h2>Paytm Money connected successfully.</h2>"
-        "<p>You can close this window and return to AI Finance Manager.</p>"
+    frontend_url = os.getenv(
+        "PAYTM_MONEY_FRONTEND_URL",
+        "http://localhost:3000",
+    ).rstrip("/")
+    return RedirectResponse(
+        url=f"{frontend_url}?paytm=connected",
+        status_code=status.HTTP_303_SEE_OTHER,
     )
 
 
