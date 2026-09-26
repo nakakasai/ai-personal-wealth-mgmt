@@ -308,14 +308,11 @@ export default function DashboardPage() {
         throw new Error(body.detail || "Could not start Paytm connection");
       }
       const body = await res.json();
-      const popup = window.open(
+      window.open(
         body.login_url,
-        "paytm-money-login",
-        "width=760,height=780,noopener,noreferrer",
+        "_blank",
+        "noopener,noreferrer",
       );
-      if (!popup) {
-        throw new Error("Please allow pop-ups and try again");
-      }
 
       setPaytmMessage("Complete login and OTP in the Paytm window...");
       for (let attempt = 0; attempt < 60; attempt += 1) {
