@@ -10,6 +10,7 @@ import upload
 import auth
 import dashboard
 import networth
+import equities
 
 
 app = FastAPI()
@@ -47,9 +48,8 @@ Base.metadata.create_all(bind=engine)
 app.include_router(auth.router)
 app.include_router(upload.router)
 app.include_router(dashboard.router)
-
-# NEW - Net Worth module
 app.include_router(networth.router)
+app.include_router(equities.router)
 
 
 # =====================================================
