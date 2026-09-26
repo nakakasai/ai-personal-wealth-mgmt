@@ -7,6 +7,7 @@ from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote
 from urllib.request import Request, urlopen
+from xml.etree import ElementTree
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import HTMLResponse
@@ -27,6 +28,9 @@ _pending_states: dict[str, tuple[int, datetime]] = {}
 _user_sessions: dict[int, dict[str, str]] = {}
 _session_lock = Lock()
 _STATE_TTL = timedelta(minutes=10)
+_FX_TTL = timedelta(hours=12)
+_fx_cache: dict[str, Any] = {}
+ECB_FX_URL = "https://www.ecb.europa.eu/stats/eurofxref/eurofxref-daily.xml"
 
 
 def _setting(name: str) -> str:
@@ -102,6 +106,56 @@ def _number(value: Any, default: float = 0) -> float:
     return default
 
 
+
+def _inr_to_jpy_rate() -> tuple[float, str]:
+    cached_at = _fx_cache.get("cached_at")
+    if (
+        cached_at
+        and datetime.utcnow() - cached_at < _FX_TTL
+        and _fx_cache.get("rate")
+    ):
+        return _fx_cache["rate"], _fx_cache["rate_date"]
+
+    request = Request(
+        ECB_FX_URL,
+        headers={"User-Agent": "AI-Finance-Manager/1.0"},
+        method="GET",
+    )
+    try:
+        with urlopen(request, timeout=15) as response:
+            root = ElementTree.fromstring(response.read())
+    except (HTTPError, URLError, TimeoutError, ElementTree.ParseError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Could not retrieve the INR/JPY reference rate from ECB",
+        ) from exc
+
+    rates: dict[str, float] = {}
+    rate_date = ""
+    for element in root.iter():
+        currency = element.attrib.get("currency")
+        rate = element.attrib.get("rate")
+        if currency and rate:
+            rates[currency] = float(rate)
+        if element.attrib.get("time"):
+            rate_date = element.attrib["time"]
+
+    if "INR" not in rates or "JPY" not in rates:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="ECB response did not contain INR and JPY rates",
+        )
+
+    # ECB rates are quoted as units per EUR. Cross-rate:
+    # JPY/INR = (JPY/EUR) / (INR/EUR).
+    inr_to_jpy = rates["JPY"] / rates["INR"]
+    _fx_cache.update(
+        rate=inr_to_jpy,
+        rate_date=rate_date,
+        cached_at=datetime.utcnow(),
+    )
+    return inr_to_jpy, rate_date
+
 def _paytm_holdings(user_id: int) -> list[dict[str, Any]]:
     session = _session_for(user_id)
     read_token = session.get("read_access_token") or session.get("access_token")
@@ -164,9 +218,12 @@ def _portfolio(user_id: int) -> dict[str, Any]:
     total_current = sum(item["current_value"] for item in holdings)
     total_gain_loss = total_current - total_invested
 
+    fx_rate, fx_rate_date = _inr_to_jpy_rate()
+
     return {
         "broker": "Paytm Money",
         "currency": "INR",
+        "base_currency": "JPY",
         "holding_count": len(holdings),
         "total_invested_value": round(total_invested, 2),
         "total_current_value": round(total_current, 2),
@@ -175,6 +232,11 @@ def _portfolio(user_id: int) -> dict[str, Any]:
             total_gain_loss / total_invested * 100 if total_invested else 0,
             2,
         ),
+        "inr_to_jpy_rate": round(fx_rate, 6),
+        "fx_rate_date": fx_rate_date,
+        "total_invested_value_jpy": round(total_invested * fx_rate, 2),
+        "total_current_value_jpy": round(total_current * fx_rate, 2),
+        "total_gain_loss_jpy": round(total_gain_loss * fx_rate, 2),
         "price_as_of": datetime.utcnow(),
         "holdings": holdings,
     }
@@ -293,8 +355,10 @@ def sync_paytm_equity(
     user_id: int = Depends(get_current_user_id),
 ):
     portfolio = _portfolio(user_id)
-    current_value = portfolio["total_current_value"]
-    invested_value = portfolio["total_invested_value"]
+    current_value_inr = portfolio["total_current_value"]
+    invested_value_inr = portfolio["total_invested_value"]
+    current_value_jpy = portfolio["total_current_value_jpy"]
+    invested_value_jpy = portfolio["total_invested_value_jpy"]
 
     asset = (
         db.query(WealthAsset)
@@ -307,8 +371,12 @@ def sync_paytm_equity(
     )
 
     note = (
-        f"Automatically synchronized {portfolio['holding_count']} holdings "
-        f"from Paytm Money Open API at {datetime.utcnow().isoformat()}Z"
+        f"Paytm Money: INR {current_value_inr:,.2f} current value; "
+        f"INR {invested_value_inr:,.2f} invested; "
+        f"converted at 1 INR = {portfolio['inr_to_jpy_rate']} JPY "
+        f"(ECB {portfolio['fx_rate_date']}); "
+        f"{portfolio['holding_count']} holdings synchronized "
+        f"at {datetime.utcnow().isoformat()}Z"
     )
 
     if asset is None:
@@ -317,17 +385,17 @@ def sync_paytm_equity(
             category="Equity",
             asset_name="Paytm Money Equity Portfolio",
             institution="Paytm Money",
-            currency="INR",
+            currency="JPY",
             source_type="api",
-            current_value=current_value,
-            invested_value=invested_value,
+            current_value=current_value_jpy,
+            invested_value=invested_value_jpy,
             notes=note,
         )
         db.add(asset)
     else:
-        asset.current_value = current_value
-        asset.invested_value = invested_value
-        asset.currency = "INR"
+        asset.current_value = current_value_jpy
+        asset.invested_value = invested_value_jpy
+        asset.currency = "JPY"
         asset.notes = note
         asset.updated_at = datetime.utcnow()
 
