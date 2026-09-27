@@ -11,6 +11,7 @@ import auth
 import dashboard
 import networth
 import equities
+import sharekhan_equities
 
 
 app = FastAPI()
@@ -50,6 +51,7 @@ app.include_router(upload.router)
 app.include_router(dashboard.router)
 app.include_router(networth.router)
 app.include_router(equities.router)
+app.include_router(sharekhan_equities.router)
 
 
 # =====================================================
